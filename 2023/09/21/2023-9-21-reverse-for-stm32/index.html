@@ -1,0 +1,755 @@
+
+
+<!DOCTYPE html>
+<html lang="en" data-default-color-scheme=auto>
+
+
+
+<head>
+  <meta charset="UTF-8">
+  <link rel="apple-touch-icon" sizes="76x76" href="/img/1.jpg">
+  <link rel="icon" href="/img/1.jpg">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, shrink-to-fit=no">
+  <meta http-equiv="x-ua-compatible" content="ie=edge">
+  
+  <meta name="theme-color" content="#2f4154">
+  <meta name="author" content="emiya">
+  <meta name="keywords" content="">
+  
+    <meta name="description" content="入坑电子的第一步">
+<meta property="og:type" content="article">
+<meta property="og:title" content="electron——OC&#x2F;OD&#x2F;上下拉&#x2F;GPIO">
+<meta property="og:url" content="http://example.com/2023/09/21/2023-9-21-reverse-for-stm32/index.html">
+<meta property="og:site_name" content="Em1ya&#39;s blog">
+<meta property="og:description" content="入坑电子的第一步">
+<meta property="og:locale" content="en_US">
+<meta property="og:image" content="http://example.com/img/led.jpg">
+<meta property="article:published_time" content="2023-09-21T04:44:00.000Z">
+<meta property="article:modified_time" content="2023-12-27T14:19:13.446Z">
+<meta property="article:author" content="emiya">
+<meta property="article:tag" content="electron">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:image" content="http://example.com/img/led.jpg">
+  
+  
+  
+  <title>electron——OC/OD/上下拉/GPIO - Em1ya&#39;s blog</title>
+
+  <link  rel="stylesheet" href="https://lib.baomitu.com/twitter-bootstrap/4.6.1/css/bootstrap.min.css" />
+
+
+
+  <link  rel="stylesheet" href="https://lib.baomitu.com/github-markdown-css/4.0.0/github-markdown.min.css" />
+
+  <link  rel="stylesheet" href="https://lib.baomitu.com/hint.css/2.7.0/hint.min.css" />
+
+  <link  rel="stylesheet" href="https://lib.baomitu.com/fancybox/3.5.7/jquery.fancybox.min.css" />
+
+
+
+<!-- 主题依赖的图标库，不要自行修改 -->
+<!-- Do not modify the link that theme dependent icons -->
+
+<link rel="stylesheet" href="//at.alicdn.com/t/font_1749284_hj8rtnfg7um.css">
+
+
+
+<link rel="stylesheet" href="//at.alicdn.com/t/font_1736178_lbnruvf0jn.css">
+
+
+<link  rel="stylesheet" href="/css/main.css" />
+
+
+  <link id="highlight-css" rel="stylesheet" href="/css/highlight.css" />
+  
+    <link id="highlight-css-dark" rel="stylesheet" href="/css/highlight-dark.css" />
+  
+
+
+
+
+  <script id="fluid-configs">
+    var Fluid = window.Fluid || {};
+    Fluid.ctx = Object.assign({}, Fluid.ctx)
+    var CONFIG = {"hostname":"example.com","root":"/","version":"1.9.7","typing":{"enable":true,"typeSpeed":70,"cursorChar":"_","loop":false,"scope":[]},"anchorjs":{"enable":true,"element":"h1,h2,h3,h4,h5,h6","placement":"left","visible":"hover","icon":""},"progressbar":{"enable":true,"height_px":3,"color":"#29d","options":{"showSpinner":false,"trickleSpeed":100}},"code_language":{"enable":true,"default":"TEXT"},"copy_btn":true,"image_caption":{"enable":true},"image_zoom":{"enable":true,"img_url_replace":["",""]},"toc":{"enable":true,"placement":"right","headingSelector":"h1,h2,h3,h4,h5,h6","collapseDepth":0},"lazyload":{"enable":true,"loading_img":"/img/loading.gif","onlypost":false,"offset_factor":2},"web_analytics":{"enable":false,"follow_dnt":true,"baidu":null,"google":{"measurement_id":null},"tencent":{"sid":null,"cid":null},"woyaola":null,"cnzz":null,"leancloud":{"app_id":null,"app_key":null,"server_url":null,"path":"window.location.pathname","ignore_local":false}},"search_path":"/local-search.xml","include_content_in_search":true};
+
+    if (CONFIG.web_analytics.follow_dnt) {
+      var dntVal = navigator.doNotTrack || window.doNotTrack || navigator.msDoNotTrack;
+      Fluid.ctx.dnt = dntVal && (dntVal.startsWith('1') || dntVal.startsWith('yes') || dntVal.startsWith('on'));
+    }
+  </script>
+  <script  src="/js/utils.js" ></script>
+  <script  src="/js/color-schema.js" ></script>
+  
+
+
+  
+<meta name="generator" content="Hexo 7.0.0"></head>
+
+
+<body>
+  
+
+  <header>
+    
+
+<div class="header-inner" style="height: 70vh;">
+  <nav id="navbar" class="navbar fixed-top  navbar-expand-lg navbar-dark scrolling-navbar">
+  <div class="container">
+    <a class="navbar-brand" href="/">
+      <strong>em1ya&#39;s blog</strong>
+    </a>
+
+    <button id="navbar-toggler-btn" class="navbar-toggler" type="button" data-toggle="collapse"
+            data-target="#navbarSupportedContent"
+            aria-controls="navbarSupportedContent" aria-expanded="false" aria-label="Toggle navigation">
+      <div class="animated-icon"><span></span><span></span><span></span></div>
+    </button>
+
+    <!-- Collapsible content -->
+    <div class="collapse navbar-collapse" id="navbarSupportedContent">
+      <ul class="navbar-nav ml-auto text-center">
+        
+          
+          
+          
+          
+            <li class="nav-item">
+              <a class="nav-link" href="/" target="_self">
+                <i class="iconfont icon-home-fill"></i>
+                <span>Home</span>
+              </a>
+            </li>
+          
+        
+          
+          
+          
+          
+            <li class="nav-item">
+              <a class="nav-link" href="/archives/" target="_self">
+                <i class="iconfont icon-archive-fill"></i>
+                <span>Archives</span>
+              </a>
+            </li>
+          
+        
+          
+          
+          
+          
+            <li class="nav-item">
+              <a class="nav-link" href="/categories/" target="_self">
+                <i class="iconfont icon-category-fill"></i>
+                <span>Categories</span>
+              </a>
+            </li>
+          
+        
+          
+          
+          
+          
+            <li class="nav-item">
+              <a class="nav-link" href="/tags/" target="_self">
+                <i class="iconfont icon-tags-fill"></i>
+                <span>Tags</span>
+              </a>
+            </li>
+          
+        
+          
+          
+          
+          
+            <li class="nav-item">
+              <a class="nav-link" href="/about/" target="_self">
+                <i class="iconfont icon-user-fill"></i>
+                <span>About</span>
+              </a>
+            </li>
+          
+        
+        
+          <li class="nav-item" id="search-btn">
+            <a class="nav-link" target="_self" href="javascript:;" data-toggle="modal" data-target="#modalSearch" aria-label="Search">
+              <i class="iconfont icon-search"></i>
+            </a>
+          </li>
+          
+        
+        
+          <li class="nav-item" id="color-toggle-btn">
+            <a class="nav-link" target="_self" href="javascript:;" aria-label="Color Toggle">
+              <i class="iconfont icon-dark" id="color-toggle-icon"></i>
+            </a>
+          </li>
+        
+      </ul>
+    </div>
+  </div>
+</nav>
+
+  
+
+<div id="banner" class="banner" parallax=true
+     style="background: url('/img/led.jpg') no-repeat center center; background-size: cover;">
+  <div class="full-bg-img">
+    <div class="mask flex-center" style="background-color: rgba(0, 0, 0, 0.3)">
+      <div class="banner-text text-center fade-in-up">
+        <div class="h2">
+          
+            <span id="subtitle" data-typed-text="electron——OC/OD/上下拉/GPIO"></span>
+          
+        </div>
+
+        
+          
+  <div class="mt-3">
+    
+    
+      <span class="post-meta">
+        <i class="iconfont icon-date-fill" aria-hidden="true"></i>
+        <time datetime="2023-09-21 12:44" pubdate>
+          September 21, 2023 pm
+        </time>
+      </span>
+    
+  </div>
+
+  <div class="mt-1">
+    
+      <span class="post-meta mr-2">
+        <i class="iconfont icon-chart"></i>
+        
+          2.1k words
+        
+      </span>
+    
+
+    
+      <span class="post-meta mr-2">
+        <i class="iconfont icon-clock-fill"></i>
+        
+        
+        
+          18 mins
+        
+      </span>
+    
+
+    
+    
+  </div>
+
+
+        
+      </div>
+
+      
+    </div>
+  </div>
+</div>
+
+</div>
+
+  </header>
+
+  <main>
+    
+      
+
+<div class="container-fluid nopadding-x">
+  <div class="row nomargin-x">
+    <div class="side-col d-none d-lg-block col-lg-2">
+      
+
+    </div>
+
+    <div class="col-lg-8 nopadding-x-md">
+      <div class="container nopadding-x-md" id="board-ctn">
+        <div id="board">
+          <article class="post-content mx-auto">
+            <h1 id="seo-header">electron——OC/OD/上下拉/GPIO</h1>
+            
+            
+              <div class="markdown-body">
+                
+                <p>入坑电子的第一步</p>
+<span id="more"></span>
+<h2 id="一、OC-OD门"><a href="#一、OC-OD门" class="headerlink" title="一、OC&#x2F;OD门"></a>一、OC&#x2F;OD门</h2><p>OC门和OD门都是集成电路中比较重要的简单电路组合，其中，OC门的核心组件是三极管（以NPN三极管为例），信号从基极输入，基极与发射极之间使用电阻连接，集电极作为输出开路。同理，OD门将OC门中的三极管换成MOSEFT即可。  </p>
+<center>
+    <img style="border-radius: 0.3125em;
+    box-shadow: 0 2px 4px 0 rgba(34,36,38,.12),0 2px 10px 0 rgba(34,36,38,.08);" 
+    src="/assets/od.png" srcset="/img/loading.gif" lazyload width="85%">
+    <br>
+    <div style="color:orange;
+    display: inline-block;
+    color: #999;
+    padding: 15px;">od门</div>
+</center>
+OC门的三极管工作在截至状态或者饱和状态，其输入和输出信号均为数字信号，当输入为高电平时，三极管导通，工作在饱和状态，由于该工作状态的限制，所以集电极和发射极（接地）之间的电压不超过0.3V，可以理解为低电平。而当输入为低电平时，三极管工作在截至状态，此时，输出部分处于高阻态，容易受到外界扰动。  
+OD门的工作状态与OC门十分相似，且性能在很多情况下好于OC门，在此不作赘述。  
+## 二、上下拉电阻
+以OC门为例，前文提到，在三极管截止时，输出端为高阻态，无法进行稳定的输出，解决该种问题的方法是在输出端（集电极）上连接一个定值电阻，电阻的另一端与Vcc相连，这种连接方式即为上拉电阻。在该种情况下继续分析：当输入为高电平时，集电极和发射极间的电压由于工作状态的限制仍不超过0.3V，而输出低电平；当输入为低电平时，上拉电阻与输出信号的端口内阻串联分压，输出默认为高电平，这就保证了输出为低时高阻态不会出现。  
+下拉电阻与上拉电阻同理，在信号线上用电阻接地，使信号输出默认为低电平，在此不做赘述。  
+## 三、推挽输出
+推挽输出的电路，由两个相反的MOSEFT构成，PMOS的源级接电源，漏极与NMOS的源极相连，NMOS的漏极接地，输出接到PMOS/NMOS的栅极，输出为NMOS的源极。  
+<center>
+    <img style="border-radius: 0.3125em;
+    box-shadow: 0 2px 4px 0 rgba(34,36,38,.12),0 2px 10px 0 rgba(34,36,38,.08);" 
+    src="/assets/push_pull.png" srcset="/img/loading.gif" lazyload width="85%">
+    <br>
+    <div style="color:orange;
+    display: inline-block;
+    color: #999;
+    padding: 15px;">推挽输出简化电路</div>
+</center>
+对电路进行分析，当输入为高电平时，NMOS导通，PMOS截止，输出引脚和接地的NMOS栅极同一电平，输出低电平，这种状态是“挽”即从输出拉取电流。  
+当输入为高电平时，NMOS截止，PMOS导通，Vdd与输出引脚导通，那么输出自然是高电平，这种状态是“推”即向输出推送电流。  
+## 四、线与
+线与是指将多个输出端互联实现按位与的功能，只有全部的输出为高电平时组合输出才为高电平。  
+对于开漏输出（OC/OD门）而言，任意一个三极管或者NMOS导通，都代表着输出端与地之间导通，仅当两个NMOS都截止时才会输出高电平。  
+而对于推挽输出而言，当一方输出为0，一方输出为1时，输出为1的一方将通过输出线产生流向输出为0一方NMOS的电流，而此时NMOS是导通的，电阻很小，会有烧坏的风险。  
+## 五、GPIO
+在处理了很多的基本电路知识之后，我们来到了通用输入输出结构，作为发送和接收数字信号或者接收模拟信号的接口，CPU对于GPIO寄存器的操会经过GPIO驱动器映射到GPIO的输出上，下面来分析GPIO的驱动电路。  
+<center>
+    <img style="border-radius: 0.3125em;
+    box-shadow: 0 2px 4px 0 rgba(34,36,38,.12),0 2px 10px 0 rgba(34,36,38,.08);" 
+    src="/assets/GPIO_bit.png" srcset="/img/loading.gif" lazyload width="85%">
+    <br>
+    <div style="color:orange;
+    display: inline-block;
+    color: #999;
+    padding: 15px;">GPIO 位结构</div>
+</center>
+
+<p>在本次分析时，我们先忽略复用功能输入和复用功能输出，进行最基本的GPIO分析。<br>首先是输出部分，输出数据寄存器的数据位与输出控制相连，输入给推挽输出的输入端（更进一步，输出控制可以控制推挽输出中MOS管是否工作，这样就可以将输出在推挽和开漏输出间进行转换），最后经过保护二极管作为IO引脚的输出。<br>其次是输入部分，输入信号经过二极管保护与上下拉电阻的控制后，是一个施密特触发器，只在电压高于高电平或者低于低电平后开始跳变，可以防止抖动，失真等等情况，如果是模拟输入，该触发器会关闭，GPIO直接读取模拟输入。<br>从以上的分析中我们可以看出，GPIO的配置不止需要数据，更需要确定其输入输出的选项功能。<br>需要确定的部分如下：  </p>
+<ul>
+<li>该引脚是否输入？</li>
+<li>该引脚如果不输入，那么输出模式是开漏还是推挽？</li>
+<li>该引脚如果输入，那么输入是上拉，下拉，浮空，还是模拟？</li>
+</ul>
+<p>在确定这些之后，我们只需要对数据寄存器进行读写就可以实现利用GPIO信号控制外设了。  </p>
+<h2 id="六、stm32-GPIO标准库分析及使用"><a href="#六、stm32-GPIO标准库分析及使用" class="headerlink" title="六、stm32 GPIO标准库分析及使用"></a>六、stm32 GPIO标准库分析及使用</h2><p>根据stm32F10X的文档，每个GPI&#x2F;O端口有两个32位配置寄存器(GPIOx_CRL，GPIOx_CRH)，两个32位数据寄存器(GPIOx_IDR和GPIOx_ODR)，一个32位置位&#x2F;复位寄存器(GPIOx_BSRR)，一个16位复位寄存器(GPIOx_BRR)和一个32位锁定寄存器(GPIOx_LCKR)。<br>其中，CR寄存器的MODE负责调整引脚是输出还是输入，如果是输出，输出速率是多少；CR寄存器的CNF负责调整输入的上下拉和模拟，输出的推挽还是开漏。数据寄存器ODR映射到输出，而BSRR和BRR以位操作的方式来置位某一位的输入输出。<br>接下来我们从标准库的源码角度来分析GPIO的操作（对代码做出一系列简化）：  </p>
+<h3 id="RCC-APB2PeriphClockCmd"><a href="#RCC-APB2PeriphClockCmd" class="headerlink" title="RCC_APB2PeriphClockCmd"></a>RCC_APB2PeriphClockCmd</h3><p>当外设时钟没有启用时，软件不能读出外设寄存器的数值，返回的数值始终是0x0,所以首先设置APB2总线的时钟即可，APB2的时钟使能寄存器RCC的每一位都代表一个连接在其上的外设，直接置位之后则可以将其打开，所以，函数传入的其实是一个位图。  </p>
+<figure class="highlight c"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br></pre></td><td class="code"><pre><code class="hljs c"><span class="hljs-type">void</span> <span class="hljs-title function_">RCC_APB2PeriphClockCmd</span><span class="hljs-params">(<span class="hljs-type">uint32_t</span> RCC_APB2Periph, FunctionalState NewState)</span>&#123;<br>  <span class="hljs-keyword">if</span> (NewState != DISABLE)&#123;<br>    RCC-&gt;APB2ENR |= RCC_APB2Periph;<br>  &#125;<br>  <span class="hljs-keyword">else</span>&#123;<br>    RCC-&gt;APB2ENR &amp;= ~RCC_APB2Periph;<br>  &#125;<br>&#125;<br></code></pre></td></tr></table></figure>
+
+<h3 id="GPIO-Init"><a href="#GPIO-Init" class="headerlink" title="GPIO_Init"></a>GPIO_Init</h3><p>首先，传入的参数分别是GPIO端口的所属，例如GPIOA、GPIOB等等，然后是GPIO的参数，包括具体引脚，MODE和速率。<br>首先是通过结构体提取了MODE部分，该部分包括了寄存器中CNF和MODE的内容，取出与0x10这一位，代表输入&#x2F;输出，如果是输出，则初始化输出速率。（其实除了MODE+CNF的四位，还有剩下的位数是分辨读写和上下拉的，因为上下拉的MODE+CNF相同）  </p>
+<figure class="highlight c"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br></pre></td><td class="code"><pre><code class="hljs c"><span class="hljs-type">void</span> <span class="hljs-title function_">GPIO_Init</span><span class="hljs-params">(GPIO_TypeDef* GPIOx, GPIO_InitTypeDef* GPIO_InitStruct)</span>&#123;<br>  <span class="hljs-type">uint32_t</span> currentmode = <span class="hljs-number">0x00</span>, currentpin = <span class="hljs-number">0x00</span>, pinpos = <span class="hljs-number">0x00</span>, pos = <span class="hljs-number">0x00</span>;<br>  <span class="hljs-type">uint32_t</span> tmpreg = <span class="hljs-number">0x00</span>, pinmask = <span class="hljs-number">0x00</span>;<br><br>  currentmode = ((<span class="hljs-type">uint32_t</span>)GPIO_InitStruct-&gt;GPIO_Mode) &amp; ((<span class="hljs-type">uint32_t</span>)<span class="hljs-number">0x0F</span>);<br><br>  <span class="hljs-keyword">if</span> ((((<span class="hljs-type">uint32_t</span>)GPIO_InitStruct-&gt;GPIO_Mode) &amp; ((<span class="hljs-type">uint32_t</span>)<span class="hljs-number">0x10</span>)) != <span class="hljs-number">0x00</span>)&#123; <br>    currentmode |= (<span class="hljs-type">uint32_t</span>)GPIO_InitStruct-&gt;GPIO_Speed;<br>  &#125;<br>  ……<br></code></pre></td></tr></table></figure>
+<p>接下来是初始化前8个针脚，按照位图的方式一个个检查需要初始化的针脚是否存在。如果存在，则找到整个CR寄存器的值中设置对应针脚的地方并清空，然后将提取的MODE的四位（GPIO_MODE&amp;0x0F）用按位或的方式置入即可。  </p>
+<pre><code class="c">  if (((uint32_t)GPIO_InitStruct-&gt;GPIO_Pin &amp; ((uint32_t)0x00FF)) != 0x00)&#123;
+    tmpreg = GPIOx-&gt;CRL;
+    for (pinpos = 0x00; pinpos &lt; 0x08; pinpos++)&#123;
+      pos = ((uint32_t)0x01) &lt;&lt; pinpos;
+      /* Get the port pins position */
+      currentpin = (GPIO_InitStruct-&gt;GPIO_Pin) &amp; pos;
+      if (currentpin == pos)&#123;
+        pos = pinpos &lt;&lt; 2;
+        /* Clear the corresponding low control register bits */
+        pinmask = ((uint32_t)0x0F) &lt;&lt; pos;
+        tmpreg &amp;= ~pinmask;
+        /* Write the mode configuration in the corresponding bits */
+        tmpreg |= (currentmode &lt;&lt; pos);
+        /* Reset the corresponding ODR bit */
+        if (GPIO_InitStruct-&gt;GPIO_Mode == GPIO_Mode_IPD)&#123;
+          GPIOx-&gt;BRR = (((uint32_t)0x01) &lt;&lt; pinpos);
+        &#125;
+        else&#123;
+          /* Set the corresponding ODR bit */
+          if (GPIO_InitStruct-&gt;GPIO_Mode == GPIO_Mode_IPU)
+          &#123;
+            GPIOx-&gt;BSRR = (((uint32_t)0x01) &lt;&lt; pinpos);
+          &#125;
+        &#125;
+      &#125;
+    &#125;
+    GPIOx-&gt;CRL = tmpreg;
+  &#125;
+&#125;
+</code></pre>
+<p>设置高位寄存器的方法十分相似，在此不做赘述。<br>GPIO初始化后，便可以通过简单的Set和Reset来输出高低电平了，也可以用来读取电平输入。<br>浅搭个小小的按键控制流水灯：</p>
+<center>
+    <img style="border-radius: 0.3125em;
+    box-shadow: 0 2px 4px 0 rgba(34,36,38,.12),0 2px 10px 0 rgba(34,36,38,.08);" 
+    src="/assets/led.jpg" srcset="/img/loading.gif" lazyload width="85%">
+    <br>
+    <div style="color:orange;
+    display: inline-block;
+    color: #999;
+    padding: 15px;">GPIO点灯</div>
+</center>
+
+<h2 id="Reference"><a href="#Reference" class="headerlink" title="Reference"></a>Reference</h2><blockquote>
+<p>详解：开漏输出与推挽输出 <a target="_blank" rel="noopener" href="https://zhuanlan.zhihu.com/p/637921779">https://zhuanlan.zhihu.com/p/637921779</a><br>理一理 OC&#x2F;OD 门、开漏输出、推挽输出等一些相关概念 <a target="_blank" rel="noopener" href="https://zhuanlan.zhihu.com/p/555471581">https://zhuanlan.zhihu.com/p/555471581</a><br>江协科技bilibili stm32教程 <a target="_blank" rel="noopener" href="https://www.bilibili.com/video/BV1th411z7sn/">https://www.bilibili.com/video/BV1th411z7sn/</a><br>stm32中文手册<br>新概念模拟电路 杨建国</p>
+</blockquote>
+
+                
+              </div>
+            
+            <hr/>
+            <div>
+              <div class="post-metas my-3">
+  
+    <div class="post-meta mr-3 d-flex align-items-center">
+      <i class="iconfont icon-category"></i>
+      
+
+<span class="category-chains">
+  
+  
+    
+      <span class="category-chain">
+        
+  <a href="/categories/electron/" class="category-chain-item">electron</a>
+  
+  
+
+      </span>
+    
+  
+</span>
+
+    </div>
+  
+  
+    <div class="post-meta">
+      <i class="iconfont icon-tags"></i>
+      
+        <a href="/tags/electron/" class="print-no-link">#electron</a>
+      
+    </div>
+  
+</div>
+
+
+              
+  
+
+  <div class="license-box my-3">
+    <div class="license-title">
+      <div>electron——OC/OD/上下拉/GPIO</div>
+      <div>http://example.com/2023/09/21/2023-9-21-reverse-for-stm32/</div>
+    </div>
+    <div class="license-meta">
+      
+        <div class="license-meta-item">
+          <div>Author</div>
+          <div>emiya</div>
+        </div>
+      
+      
+        <div class="license-meta-item license-meta-date">
+          <div>Posted on</div>
+          <div>September 21, 2023</div>
+        </div>
+      
+      
+      
+        <div class="license-meta-item">
+          <div>Licensed under</div>
+          <div>
+            
+              
+              
+                <a class="print-no-link" target="_blank" href="https://creativecommons.org/licenses/by/4.0/">
+                  <span class="hint--top hint--rounded" aria-label="BY - Attribution">
+                    <i class="iconfont icon-by"></i>
+                  </span>
+                </a>
+              
+            
+          </div>
+        </div>
+      
+    </div>
+    <div class="license-icon iconfont"></div>
+  </div>
+
+
+
+              
+                <div class="post-prevnext my-3">
+                  <article class="post-prev col-6">
+                    
+                    
+                      <a href="/2023/12/27/hello-world/" title="建站伊始">
+                        <i class="iconfont icon-arrowleft"></i>
+                        <span class="hidden-mobile">建站伊始</span>
+                        <span class="visible-mobile">Previous</span>
+                      </a>
+                    
+                  </article>
+                  <article class="post-next col-6">
+                    
+                    
+                      <a href="/2023/03/14/2023-3-14-GlibcIO/" title="雪夜杂谈——glibc _IO_FILE分析">
+                        <span class="hidden-mobile">雪夜杂谈——glibc _IO_FILE分析</span>
+                        <span class="visible-mobile">Next</span>
+                        <i class="iconfont icon-arrowright"></i>
+                      </a>
+                    
+                  </article>
+                </div>
+              
+            </div>
+
+            
+          </article>
+        </div>
+      </div>
+    </div>
+
+    <div class="side-col d-none d-lg-block col-lg-2">
+      
+  <aside class="sidebar" style="margin-left: -1rem">
+    <div id="toc">
+  <p class="toc-header">
+    <i class="iconfont icon-list"></i>
+    <span>Table of Contents</span>
+  </p>
+  <div class="toc-body" id="toc-body"></div>
+</div>
+
+
+
+  </aside>
+
+
+    </div>
+  </div>
+</div>
+
+
+
+
+
+  
+
+
+
+  
+
+
+
+  
+
+
+
+  
+
+
+
+  
+
+
+
+
+
+
+
+    
+
+    
+      <a id="scroll-top-button" aria-label="TOP" href="#" role="button">
+        <i class="iconfont icon-arrowup" aria-hidden="true"></i>
+      </a>
+    
+
+    
+      <div class="modal fade" id="modalSearch" tabindex="-1" role="dialog" aria-labelledby="ModalLabel"
+     aria-hidden="true">
+  <div class="modal-dialog modal-dialog-scrollable modal-lg" role="document">
+    <div class="modal-content">
+      <div class="modal-header text-center">
+        <h4 class="modal-title w-100 font-weight-bold">Search</h4>
+        <button type="button" id="local-search-close" class="close" data-dismiss="modal" aria-label="Close">
+          <span aria-hidden="true">&times;</span>
+        </button>
+      </div>
+      <div class="modal-body mx-3">
+        <div class="md-form mb-5">
+          <input type="text" id="local-search-input" class="form-control validate">
+          <label data-error="x" data-success="v" for="local-search-input">Keyword</label>
+        </div>
+        <div class="list-group" id="local-search-result"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+    
+
+    
+  </main>
+
+  <footer>
+    <div class="footer-inner">
+  
+    <div class="footer-content">
+       <a href="https://hexo.io" target="_blank" rel="nofollow noopener"><span>Hexo</span></a> <i class="iconfont icon-love"></i> <a href="https://github.com/fluid-dev/hexo-theme-fluid" target="_blank" rel="nofollow noopener"><span>Fluid</span></a> 
+    </div>
+  
+  
+  
+  
+</div>
+
+  </footer>
+
+  <!-- Scripts -->
+  
+  <script  src="https://lib.baomitu.com/nprogress/0.2.0/nprogress.min.js" ></script>
+  <link  rel="stylesheet" href="https://lib.baomitu.com/nprogress/0.2.0/nprogress.min.css" />
+
+  <script>
+    NProgress.configure({"showSpinner":false,"trickleSpeed":100})
+    NProgress.start()
+    window.addEventListener('load', function() {
+      NProgress.done();
+    })
+  </script>
+
+
+<script  src="https://lib.baomitu.com/jquery/3.6.4/jquery.min.js" ></script>
+<script  src="https://lib.baomitu.com/twitter-bootstrap/4.6.1/js/bootstrap.min.js" ></script>
+<script  src="/js/events.js" ></script>
+<script  src="/js/plugins.js" ></script>
+
+
+  <script  src="https://lib.baomitu.com/typed.js/2.0.12/typed.min.js" ></script>
+  <script>
+    (function (window, document) {
+      var typing = Fluid.plugins.typing;
+      var subtitle = document.getElementById('subtitle');
+      if (!subtitle || !typing) {
+        return;
+      }
+      var text = subtitle.getAttribute('data-typed-text');
+      
+        typing(text);
+      
+    })(window, document);
+  </script>
+
+
+
+
+  
+    <script  src="/js/img-lazyload.js" ></script>
+  
+
+
+
+
+  
+<script>
+  Fluid.utils.createScript('https://lib.baomitu.com/tocbot/4.20.1/tocbot.min.js', function() {
+    var toc = jQuery('#toc');
+    if (toc.length === 0 || !window.tocbot) { return; }
+    var boardCtn = jQuery('#board-ctn');
+    var boardTop = boardCtn.offset().top;
+
+    window.tocbot.init(Object.assign({
+      tocSelector     : '#toc-body',
+      contentSelector : '.markdown-body',
+      linkClass       : 'tocbot-link',
+      activeLinkClass : 'tocbot-active-link',
+      listClass       : 'tocbot-list',
+      isCollapsedClass: 'tocbot-is-collapsed',
+      collapsibleClass: 'tocbot-is-collapsible',
+      scrollSmooth    : true,
+      includeTitleTags: true,
+      headingsOffset  : -boardTop,
+    }, CONFIG.toc));
+    if (toc.find('.toc-list-item').length > 0) {
+      toc.css('visibility', 'visible');
+    }
+
+    Fluid.events.registerRefreshCallback(function() {
+      if ('tocbot' in window) {
+        tocbot.refresh();
+        var toc = jQuery('#toc');
+        if (toc.length === 0 || !tocbot) {
+          return;
+        }
+        if (toc.find('.toc-list-item').length > 0) {
+          toc.css('visibility', 'visible');
+        }
+      }
+    });
+  });
+</script>
+
+
+  <script src=https://lib.baomitu.com/clipboard.js/2.0.11/clipboard.min.js></script>
+
+  <script>Fluid.plugins.codeWidget();</script>
+
+
+  
+<script>
+  Fluid.utils.createScript('https://lib.baomitu.com/anchor-js/4.3.1/anchor.min.js', function() {
+    window.anchors.options = {
+      placement: CONFIG.anchorjs.placement,
+      visible  : CONFIG.anchorjs.visible
+    };
+    if (CONFIG.anchorjs.icon) {
+      window.anchors.options.icon = CONFIG.anchorjs.icon;
+    }
+    var el = (CONFIG.anchorjs.element || 'h1,h2,h3,h4,h5,h6').split(',');
+    var res = [];
+    for (var item of el) {
+      res.push('.markdown-body > ' + item.trim());
+    }
+    if (CONFIG.anchorjs.placement === 'left') {
+      window.anchors.options.class = 'anchorjs-link-left';
+    }
+    window.anchors.add(res.join(', '));
+
+    Fluid.events.registerRefreshCallback(function() {
+      if ('anchors' in window) {
+        anchors.removeAll();
+        var el = (CONFIG.anchorjs.element || 'h1,h2,h3,h4,h5,h6').split(',');
+        var res = [];
+        for (var item of el) {
+          res.push('.markdown-body > ' + item.trim());
+        }
+        if (CONFIG.anchorjs.placement === 'left') {
+          anchors.options.class = 'anchorjs-link-left';
+        }
+        anchors.add(res.join(', '));
+      }
+    });
+  });
+</script>
+
+
+  
+<script>
+  Fluid.utils.createScript('https://lib.baomitu.com/fancybox/3.5.7/jquery.fancybox.min.js', function() {
+    Fluid.plugins.fancyBox();
+  });
+</script>
+
+
+  <script>Fluid.plugins.imageCaption();</script>
+
+  <script  src="/js/local-search.js" ></script>
+
+
+
+
+
+<!-- 主题的启动项，将它保持在最底部 -->
+<!-- the boot of the theme, keep it at the bottom -->
+<script  src="/js/boot.js" ></script>
+
+
+  
+
+  <noscript>
+    <div class="noscript-warning">Blog works best with JavaScript enabled</div>
+  </noscript>
+</body>
+</html>

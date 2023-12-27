@@ -1,0 +1,688 @@
+
+
+<!DOCTYPE html>
+<html lang="en" data-default-color-scheme=auto>
+
+
+
+<head>
+  <meta charset="UTF-8">
+  <link rel="apple-touch-icon" sizes="76x76" href="/img/1.jpg">
+  <link rel="icon" href="/img/1.jpg">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, shrink-to-fit=no">
+  <meta http-equiv="x-ua-compatible" content="ie=edge">
+  
+  <meta name="theme-color" content="#2f4154">
+  <meta name="author" content="emiya">
+  <meta name="keywords" content="">
+  
+    <meta name="description" content="引言：近年来，对于用户态的堆利用已经十分成熟，但是，在打击点（控制流）方面还是十分单一，不过是malloc hook&#x2F;free hook的利用（当今能够轻松进行GOT篡改和栈返回地址篡改的题目确实已经很少了），_IO_FILE利用逐渐风靡。说到_IO_FILE，我们其实可以将其当作用户态对于系统调用的包装，它使得开发者能够更加透明地利用系统文件的读写，并且隐藏块读取（设备友好）和字节读取（开发者友">
+<meta property="og:type" content="article">
+<meta property="og:title" content="雪夜杂谈——glibc _IO_FILE分析">
+<meta property="og:url" content="http://example.com/2023/03/14/2023-3-14-GlibcIO/index.html">
+<meta property="og:site_name" content="Em1ya&#39;s blog">
+<meta property="og:description" content="引言：近年来，对于用户态的堆利用已经十分成熟，但是，在打击点（控制流）方面还是十分单一，不过是malloc hook&#x2F;free hook的利用（当今能够轻松进行GOT篡改和栈返回地址篡改的题目确实已经很少了），_IO_FILE利用逐渐风靡。说到_IO_FILE，我们其实可以将其当作用户态对于系统调用的包装，它使得开发者能够更加透明地利用系统文件的读写，并且隐藏块读取（设备友好）和字节读取（开发者友">
+<meta property="og:locale" content="en_US">
+<meta property="og:image" content="http://example.com/img/fread.png">
+<meta property="article:published_time" content="2023-03-14T10:34:00.000Z">
+<meta property="article:modified_time" content="2023-12-27T14:18:23.252Z">
+<meta property="article:author" content="emiya">
+<meta property="article:tag" content="pwn">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:image" content="http://example.com/img/fread.png">
+  
+  
+  
+  <title>雪夜杂谈——glibc _IO_FILE分析 - Em1ya&#39;s blog</title>
+
+  <link  rel="stylesheet" href="https://lib.baomitu.com/twitter-bootstrap/4.6.1/css/bootstrap.min.css" />
+
+
+
+  <link  rel="stylesheet" href="https://lib.baomitu.com/github-markdown-css/4.0.0/github-markdown.min.css" />
+
+  <link  rel="stylesheet" href="https://lib.baomitu.com/hint.css/2.7.0/hint.min.css" />
+
+  <link  rel="stylesheet" href="https://lib.baomitu.com/fancybox/3.5.7/jquery.fancybox.min.css" />
+
+
+
+<!-- 主题依赖的图标库，不要自行修改 -->
+<!-- Do not modify the link that theme dependent icons -->
+
+<link rel="stylesheet" href="//at.alicdn.com/t/font_1749284_hj8rtnfg7um.css">
+
+
+
+<link rel="stylesheet" href="//at.alicdn.com/t/font_1736178_lbnruvf0jn.css">
+
+
+<link  rel="stylesheet" href="/css/main.css" />
+
+
+  <link id="highlight-css" rel="stylesheet" href="/css/highlight.css" />
+  
+    <link id="highlight-css-dark" rel="stylesheet" href="/css/highlight-dark.css" />
+  
+
+
+
+
+  <script id="fluid-configs">
+    var Fluid = window.Fluid || {};
+    Fluid.ctx = Object.assign({}, Fluid.ctx)
+    var CONFIG = {"hostname":"example.com","root":"/","version":"1.9.7","typing":{"enable":true,"typeSpeed":70,"cursorChar":"_","loop":false,"scope":[]},"anchorjs":{"enable":true,"element":"h1,h2,h3,h4,h5,h6","placement":"left","visible":"hover","icon":""},"progressbar":{"enable":true,"height_px":3,"color":"#29d","options":{"showSpinner":false,"trickleSpeed":100}},"code_language":{"enable":true,"default":"TEXT"},"copy_btn":true,"image_caption":{"enable":true},"image_zoom":{"enable":true,"img_url_replace":["",""]},"toc":{"enable":true,"placement":"right","headingSelector":"h1,h2,h3,h4,h5,h6","collapseDepth":0},"lazyload":{"enable":true,"loading_img":"/img/loading.gif","onlypost":false,"offset_factor":2},"web_analytics":{"enable":false,"follow_dnt":true,"baidu":null,"google":{"measurement_id":null},"tencent":{"sid":null,"cid":null},"woyaola":null,"cnzz":null,"leancloud":{"app_id":null,"app_key":null,"server_url":null,"path":"window.location.pathname","ignore_local":false}},"search_path":"/local-search.xml","include_content_in_search":true};
+
+    if (CONFIG.web_analytics.follow_dnt) {
+      var dntVal = navigator.doNotTrack || window.doNotTrack || navigator.msDoNotTrack;
+      Fluid.ctx.dnt = dntVal && (dntVal.startsWith('1') || dntVal.startsWith('yes') || dntVal.startsWith('on'));
+    }
+  </script>
+  <script  src="/js/utils.js" ></script>
+  <script  src="/js/color-schema.js" ></script>
+  
+
+
+  
+<meta name="generator" content="Hexo 7.0.0"></head>
+
+
+<body>
+  
+
+  <header>
+    
+
+<div class="header-inner" style="height: 70vh;">
+  <nav id="navbar" class="navbar fixed-top  navbar-expand-lg navbar-dark scrolling-navbar">
+  <div class="container">
+    <a class="navbar-brand" href="/">
+      <strong>em1ya&#39;s blog</strong>
+    </a>
+
+    <button id="navbar-toggler-btn" class="navbar-toggler" type="button" data-toggle="collapse"
+            data-target="#navbarSupportedContent"
+            aria-controls="navbarSupportedContent" aria-expanded="false" aria-label="Toggle navigation">
+      <div class="animated-icon"><span></span><span></span><span></span></div>
+    </button>
+
+    <!-- Collapsible content -->
+    <div class="collapse navbar-collapse" id="navbarSupportedContent">
+      <ul class="navbar-nav ml-auto text-center">
+        
+          
+          
+          
+          
+            <li class="nav-item">
+              <a class="nav-link" href="/" target="_self">
+                <i class="iconfont icon-home-fill"></i>
+                <span>Home</span>
+              </a>
+            </li>
+          
+        
+          
+          
+          
+          
+            <li class="nav-item">
+              <a class="nav-link" href="/archives/" target="_self">
+                <i class="iconfont icon-archive-fill"></i>
+                <span>Archives</span>
+              </a>
+            </li>
+          
+        
+          
+          
+          
+          
+            <li class="nav-item">
+              <a class="nav-link" href="/categories/" target="_self">
+                <i class="iconfont icon-category-fill"></i>
+                <span>Categories</span>
+              </a>
+            </li>
+          
+        
+          
+          
+          
+          
+            <li class="nav-item">
+              <a class="nav-link" href="/tags/" target="_self">
+                <i class="iconfont icon-tags-fill"></i>
+                <span>Tags</span>
+              </a>
+            </li>
+          
+        
+          
+          
+          
+          
+            <li class="nav-item">
+              <a class="nav-link" href="/about/" target="_self">
+                <i class="iconfont icon-user-fill"></i>
+                <span>About</span>
+              </a>
+            </li>
+          
+        
+        
+          <li class="nav-item" id="search-btn">
+            <a class="nav-link" target="_self" href="javascript:;" data-toggle="modal" data-target="#modalSearch" aria-label="Search">
+              <i class="iconfont icon-search"></i>
+            </a>
+          </li>
+          
+        
+        
+          <li class="nav-item" id="color-toggle-btn">
+            <a class="nav-link" target="_self" href="javascript:;" aria-label="Color Toggle">
+              <i class="iconfont icon-dark" id="color-toggle-icon"></i>
+            </a>
+          </li>
+        
+      </ul>
+    </div>
+  </div>
+</nav>
+
+  
+
+<div id="banner" class="banner" parallax=true
+     style="background: url('/img/fread.png') no-repeat center center; background-size: cover;">
+  <div class="full-bg-img">
+    <div class="mask flex-center" style="background-color: rgba(0, 0, 0, 0.3)">
+      <div class="banner-text text-center fade-in-up">
+        <div class="h2">
+          
+            <span id="subtitle" data-typed-text="雪夜杂谈——glibc _IO_FILE分析"></span>
+          
+        </div>
+
+        
+          
+  <div class="mt-3">
+    
+    
+      <span class="post-meta">
+        <i class="iconfont icon-date-fill" aria-hidden="true"></i>
+        <time datetime="2023-03-14 18:34" pubdate>
+          March 14, 2023 pm
+        </time>
+      </span>
+    
+  </div>
+
+  <div class="mt-1">
+    
+      <span class="post-meta mr-2">
+        <i class="iconfont icon-chart"></i>
+        
+          1.6k words
+        
+      </span>
+    
+
+    
+      <span class="post-meta mr-2">
+        <i class="iconfont icon-clock-fill"></i>
+        
+        
+        
+          14 mins
+        
+      </span>
+    
+
+    
+    
+  </div>
+
+
+        
+      </div>
+
+      
+    </div>
+  </div>
+</div>
+
+</div>
+
+  </header>
+
+  <main>
+    
+      
+
+<div class="container-fluid nopadding-x">
+  <div class="row nomargin-x">
+    <div class="side-col d-none d-lg-block col-lg-2">
+      
+
+    </div>
+
+    <div class="col-lg-8 nopadding-x-md">
+      <div class="container nopadding-x-md" id="board-ctn">
+        <div id="board">
+          <article class="post-content mx-auto">
+            <h1 id="seo-header">雪夜杂谈——glibc _IO_FILE分析</h1>
+            
+            
+              <div class="markdown-body">
+                
+                <h2 id="引言："><a href="#引言：" class="headerlink" title="引言："></a>引言：</h2><p>近年来，对于用户态的堆利用已经十分成熟，但是，在打击点（控制流）方面还是十分单一，不过是<code>malloc hook/free hook</code>的利用（当今能够轻松进行GOT篡改和栈返回地址篡改的题目确实已经很少了），<code>_IO_FILE</code>利用逐渐风靡。<br>说到<code>_IO_FILE</code>，我们其实可以将其当作用户态对于系统调用的包装，它使得开发者能够更加透明地利用系统文件的读写，并且隐藏块读取（设备友好）和字节读取（开发者友好）的冲突。它定义了对于数据的组织和存取方法（只不过更加上层，在用户层的定义封装方法）。<br>以下将对glibc中的<code>fread/fwrite</code>进行简要分析：</p>
+<span id="more"></span>
+<h2 id="fread函数：读入ptr-end之间的数据"><a href="#fread函数：读入ptr-end之间的数据" class="headerlink" title="fread函数：读入ptr-end之间的数据"></a>fread函数：读入ptr-end之间的数据</h2><h3 id="IO-file-xsgetn：根据缓冲区的情况决定如何读入"><a href="#IO-file-xsgetn：根据缓冲区的情况决定如何读入" class="headerlink" title="_IO_file_xsgetn：根据缓冲区的情况决定如何读入"></a>_IO_file_xsgetn：根据缓冲区的情况决定如何读入</h3><p>其调用图如下：</p>
+<figure class="highlight gherkin"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br></pre></td><td class="code"><pre><code class="hljs gherkin">_IO_fread<br>    |<span class="hljs-string">----_IO_XSGETN</span><br><span class="hljs-string">            </span>|<span class="hljs-string">----_IO_file_xsgetn</span><br><span class="hljs-string">                        </span>|<span class="hljs-string">----_IO_doallocbuf</span><br><span class="hljs-string">                        </span>|<span class="hljs-string">           </span>|<span class="hljs-string">----malloc</span><br><span class="hljs-string">                        </span>|<span class="hljs-string">----_IO_new_file_underflow</span><br><span class="hljs-string">                                    </span>|<span class="hljs-string">----SYSREAD</span><br></code></pre></td></tr></table></figure>
+<figure class="highlight c"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br><span class="line">33</span><br><span class="line">34</span><br><span class="line">35</span><br><span class="line">36</span><br><span class="line">37</span><br><span class="line">38</span><br><span class="line">39</span><br><span class="line">40</span><br><span class="line">41</span><br><span class="line">42</span><br><span class="line">43</span><br><span class="line">44</span><br><span class="line">45</span><br><span class="line">46</span><br><span class="line">47</span><br><span class="line">48</span><br><span class="line">49</span><br><span class="line">50</span><br><span class="line">51</span><br><span class="line">52</span><br><span class="line">53</span><br><span class="line">54</span><br><span class="line">55</span><br><span class="line">56</span><br><span class="line">57</span><br><span class="line">58</span><br><span class="line">59</span><br><span class="line">60</span><br><span class="line">61</span><br><span class="line">62</span><br><span class="line">63</span><br><span class="line">64</span><br><span class="line">65</span><br><span class="line">66</span><br><span class="line">67</span><br><span class="line">68</span><br><span class="line">69</span><br><span class="line">70</span><br><span class="line">71</span><br><span class="line">72</span><br><span class="line">73</span><br><span class="line">74</span><br><span class="line">75</span><br></pre></td><td class="code"><pre><code class="hljs c">_IO_size_t _IO_file_xsgetn (_IO_FILE *fp, <span class="hljs-type">void</span> *data, _IO_size_t n)<br>&#123;<br>  _IO_size_t want, have;<br>  _IO_ssize_t count;<br>  <span class="hljs-type">char</span> *s = data;<br>  want = n;<br>  <span class="hljs-keyword">if</span> (fp-&gt;_IO_buf_base == <span class="hljs-literal">NULL</span>)<br>  &#123;<br>      <span class="hljs-comment">//alloc the buffer</span><br>      _IO_doallocbuf (fp);<br>  &#125;<br><br>  <span class="hljs-keyword">while</span> (want &gt; <span class="hljs-number">0</span>)<br>  &#123;<br>    have = fp-&gt;_IO_read_end - fp-&gt;_IO_read_ptr;<br>    <span class="hljs-comment">//enough data for request-&gt;copy all the data to user</span><br>    <span class="hljs-keyword">if</span> (want &lt;= have)<br>    &#123;<br>      <span class="hljs-built_in">memcpy</span> (s, fp-&gt;_IO_read_ptr, want);<br>      fp-&gt;_IO_read_ptr += want;<br>      want = <span class="hljs-number">0</span>;<br>    &#125;<br>    <span class="hljs-keyword">else</span><br>    &#123;<br>    <span class="hljs-comment">//not enough,read the remainder first</span><br>      <span class="hljs-keyword">if</span> (have &gt; <span class="hljs-number">0</span>)<br>      &#123;<br>        <span class="hljs-built_in">memcpy</span> (s, fp-&gt;_IO_read_ptr, have);<br>        s += have;<br>        want -= have;<br>        fp-&gt;_IO_read_ptr += have;<br>      &#125;<br>      <span class="hljs-comment">/* If we now want less than a buffer, underflow and repeat</span><br><span class="hljs-comment">         the copy.  Otherwise, _IO_SYSREAD directly to</span><br><span class="hljs-comment">         the user buffer. */</span><br>      <span class="hljs-keyword">if</span> (fp-&gt;_IO_buf_base<br>          &amp;&amp; want &lt; (<span class="hljs-type">size_t</span>) (fp-&gt;_IO_buf_end - fp-&gt;_IO_buf_base))<br>      &#123;<br>          <span class="hljs-keyword">if</span> (__underflow (fp) == EOF)<br>            <span class="hljs-keyword">break</span>;<br>          <span class="hljs-keyword">continue</span>;<br>      &#125;<br><br>      <span class="hljs-comment">/* These must be set before the sysread as we might longjmp out</span><br><span class="hljs-comment">         waiting for input. */</span><br>      _IO_setg (fp, fp-&gt;_IO_buf_base, fp-&gt;_IO_buf_base, fp-&gt;_IO_buf_base);<br>      _IO_setp (fp, fp-&gt;_IO_buf_base, fp-&gt;_IO_buf_base);<br><br>      <span class="hljs-comment">/* Try to maintain alignment: read a whole number of blocks.  */</span><br>      count = want;<br>      <span class="hljs-keyword">if</span> (fp-&gt;_IO_buf_base)<br>      &#123;<br>        _IO_size_t block_size = fp-&gt;_IO_buf_end - fp-&gt;_IO_buf_base;<br>        <span class="hljs-keyword">if</span> (block_size &gt;= <span class="hljs-number">128</span>)<br>          count -= want % block_size;<br>      &#125;<br><br>      count = _IO_SYSREAD (fp, s, count);<br>      <span class="hljs-keyword">if</span> (count &lt;= <span class="hljs-number">0</span>)<br>      &#123;<br>        <span class="hljs-keyword">if</span> (count == <span class="hljs-number">0</span>)<br>          fp-&gt;_flags |= _IO_EOF_SEEN;<br>        <span class="hljs-keyword">else</span><br>          fp-&gt;_flags |= _IO_ERR_SEEN;<br>        <span class="hljs-keyword">break</span>;<br>      &#125;<br><br>      s += count;<br>      want -= count;<br>      <span class="hljs-keyword">if</span> (fp-&gt;_offset != _IO_pos_BAD)<br>        _IO_pos_adjust (fp-&gt;_offset, count);<br>    &#125;<br>  &#125;<br>  <span class="hljs-keyword">return</span> n - want;<br>&#125;<br></code></pre></td></tr></table></figure>
+<h3 id="IO-new-file-underflow"><a href="#IO-new-file-underflow" class="headerlink" title="_IO_new_file_underflow"></a>_IO_new_file_underflow</h3><figure class="highlight c"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br></pre></td><td class="code"><pre><code class="hljs c"><span class="hljs-type">int</span> _IO_new_file_underflow (_IO_FILE *fp)  <br>&#123;  <br>  _IO_ssize_t count;  <br>  <span class="hljs-comment">//have read all the remainder</span><br>  <span class="hljs-keyword">if</span> (fp-&gt;_IO_read_ptr &lt; fp-&gt;_IO_read_end)  <br>    <span class="hljs-keyword">return</span> *(<span class="hljs-type">unsigned</span> <span class="hljs-type">char</span> *) fp-&gt;_IO_read_ptr;  <br>  <span class="hljs-comment">//if no buffer allocate one!</span><br>  <span class="hljs-keyword">if</span> (fp-&gt;_IO_buf_base == <span class="hljs-literal">NULL</span>)  <br>  &#123;  <br>      _IO_doallocbuf (fp);  <br>  &#125;  <br>  _IO_switch_to_get_mode (fp);  <br>  <span class="hljs-comment">//no remainder,so flush the read buf</span><br>  fp-&gt;_IO_read_base = fp-&gt;_IO_read_ptr = fp-&gt;_IO_buf_base;  <br>  fp-&gt;_IO_read_end = fp-&gt;_IO_buf_base;  <br>  fp-&gt;_IO_write_base = fp-&gt;_IO_write_ptr = fp-&gt;_IO_write_end = fp-&gt;_IO_buf_base;  <br>  <span class="hljs-comment">//read into all the buf</span><br>  count = _IO_SYSREAD (fp, fp-&gt;_IO_buf_base, fp-&gt;_IO_buf_end - fp-&gt;_IO_buf_base);  <br>  <span class="hljs-keyword">if</span> (count &lt;= <span class="hljs-number">0</span>)  <br>  &#123;  <br>    <span class="hljs-keyword">if</span> (count == <span class="hljs-number">0</span>)  <br>      fp-&gt;_flags |= _IO_EOF_SEEN;  <br>    <span class="hljs-keyword">else</span>  <br>      fp-&gt;_flags |= _IO_ERR_SEEN, count = <span class="hljs-number">0</span>;  <br>  &#125; <br>  <span class="hljs-comment">//data is between read ptr and read end</span><br>  fp-&gt;_IO_read_end += count;   <br>  <span class="hljs-keyword">return</span> *(<span class="hljs-type">unsigned</span> <span class="hljs-type">char</span> *) fp-&gt;_IO_read_ptr;  <br>&#125;  <br></code></pre></td></tr></table></figure>
+<p>通过上述代码，我们可以发现，fread事实上是对系统调用read的包装，由于需要配合缓冲区而稍显复杂。在<code>_IO_file_xsgetn</code>中，函数先尽力将缓冲中的数据尽数输出，如果仍然达不到需要，则调用<code>_IO_new_file_underflow</code>过程。该过程中因为考虑到缓冲区中已经没有了未读数据，就直接刷新缓冲（将读指针的始末调到缓冲的开始），并在读取之后将<code>_IO_read_end</code>指针指向末尾，完成了新的缓冲状态建立。  </p>
+<center>
+    <img style="border-radius: 0.3125em;
+    box-shadow: 0 2px 4px 0 rgba(34,36,38,.12),0 2px 10px 0 rgba(34,36,38,.08);" 
+    src="/assets/fread.png" srcset="/img/loading.gif" lazyload width="85%">
+    <br>
+    <div style="color:orange;
+    display: inline-block;
+    color: #999;
+    padding: 15px;">fread缓冲区操作</div>
+</center>
+
+<p>在这种模型中，每次调用<code>fread</code>libc都会假设该文件的缓冲中可能有残留信息，也会在每次读取完成后达成该种状态，即：通过系统调用按用户需要读取，但<code>underflow</code>读取时按缓冲区块读取。  </p>
+<h2 id="fwrite函数：输出base-ptr之间的数据"><a href="#fwrite函数：输出base-ptr之间的数据" class="headerlink" title="fwrite函数：输出base-ptr之间的数据"></a>fwrite函数：输出base-ptr之间的数据</h2><p>其调用图如下：</p>
+<figure class="highlight gherkin"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br></pre></td><td class="code"><pre><code class="hljs gherkin">_IO_fwrite<br>    |<span class="hljs-string">----_IO_new_file_xsputn</span><br><span class="hljs-string">                </span>|<span class="hljs-string">----_IO_new_file_overflow</span><br><span class="hljs-string">                </span>|<span class="hljs-string">           </span>|<span class="hljs-string">----_IO_doallocbuf</span><br><span class="hljs-string">                </span>|<span class="hljs-string">           </span>|<span class="hljs-string">          </span>|<span class="hljs-string">----malloc</span><br><span class="hljs-string">                </span>|<span class="hljs-string">           </span>|<span class="hljs-string">----new_do_write</span><br><span class="hljs-string">                </span>|<span class="hljs-string">                      </span>|<span class="hljs-string">----SYSWRITE</span><br><span class="hljs-string">                </span>|<br>                |<span class="hljs-string">----_IO_default_xsputn</span><br><span class="hljs-string">                            </span>|<span class="hljs-string">----_IO_new_file_overflow</span><br></code></pre></td></tr></table></figure>
+<h3 id="IO-xsputn：根据缓冲区的情况决定如何输出"><a href="#IO-xsputn：根据缓冲区的情况决定如何输出" class="headerlink" title="_IO_xsputn：根据缓冲区的情况决定如何输出"></a>_IO_xsputn：根据缓冲区的情况决定如何输出</h3><figure class="highlight c"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br><span class="line">33</span><br><span class="line">34</span><br><span class="line">35</span><br><span class="line">36</span><br><span class="line">37</span><br><span class="line">38</span><br><span class="line">39</span><br><span class="line">40</span><br><span class="line">41</span><br><span class="line">42</span><br><span class="line">43</span><br><span class="line">44</span><br><span class="line">45</span><br><span class="line">46</span><br><span class="line">47</span><br><span class="line">48</span><br><span class="line">49</span><br><span class="line">50</span><br><span class="line">51</span><br><span class="line">52</span><br><span class="line">53</span><br><span class="line">54</span><br><span class="line">55</span><br><span class="line">56</span><br><span class="line">57</span><br><span class="line">58</span><br><span class="line">59</span><br><span class="line">60</span><br><span class="line">61</span><br><span class="line">62</span><br><span class="line">63</span><br><span class="line">64</span><br><span class="line">65</span><br><span class="line">66</span><br></pre></td><td class="code"><pre><code class="hljs c">_IO_size_t _IO_new_file_xsputn (_IO_FILE *f, <span class="hljs-type">const</span> <span class="hljs-type">void</span> *data, _IO_size_t n)<br>&#123;<br>  <span class="hljs-type">const</span> <span class="hljs-type">char</span> *s = (<span class="hljs-type">const</span> <span class="hljs-type">char</span> *) data;<br>  _IO_size_t to_do = n;<br>  <span class="hljs-type">int</span> must_flush = <span class="hljs-number">0</span>;<br>  _IO_size_t count = <span class="hljs-number">0</span>;<br>  <span class="hljs-comment">//if there is no needbuf or is putting now-&gt;out put the line</span><br>  <span class="hljs-keyword">if</span> ((f-&gt;_flags &amp; _IO_LINE_BUF) &amp;&amp; (f-&gt;_flags &amp; _IO_CURRENTLY_PUTTING))<br>  &#123;<br>    count = f-&gt;_IO_buf_end - f-&gt;_IO_write_ptr;<br>    <span class="hljs-keyword">if</span> (count &gt;= n)<br>	&#123;<br>	  <span class="hljs-type">const</span> <span class="hljs-type">char</span> *p;<br>	  <span class="hljs-keyword">for</span> (p = s + n; p &gt; s; )<br>	  &#123;<br>	    <span class="hljs-keyword">if</span> (*--p == <span class="hljs-string">&#x27;\n&#x27;</span>)<br>		&#123;<br>		    count = p - s + <span class="hljs-number">1</span>;<br>		    must_flush = <span class="hljs-number">1</span>;<br>		    <span class="hljs-keyword">break</span>;<br>		&#125;<br>	  &#125;<br>	&#125;<br>  &#125;<br>  <span class="hljs-comment">//count means how many empty buf we have and then we will fill it</span><br>  <span class="hljs-keyword">else</span> <span class="hljs-keyword">if</span> (f-&gt;_IO_write_end &gt; f-&gt;_IO_write_ptr)<br>    count = f-&gt;_IO_write_end - f-&gt;_IO_write_ptr;<br><br>  <span class="hljs-comment">//fill the buffer</span><br>  <span class="hljs-keyword">if</span> (count &gt; <span class="hljs-number">0</span>)<br>  &#123;<br>      <span class="hljs-keyword">if</span> (count &gt; to_do)<br>	      count = to_do;<br>      <span class="hljs-built_in">memcpy</span> (f-&gt;_IO_write_ptr, s, count);<br>      f-&gt;_IO_write_ptr += count;<br>      s += count;<br>      to_do -= count;<br>  &#125;<br>  <span class="hljs-comment">//if we fill the whole space but we need more output</span><br>  <span class="hljs-keyword">if</span> (to_do + must_flush &gt; <span class="hljs-number">0</span>)<br>  &#123;<br>      _IO_size_t block_size, do_write;<br>  <span class="hljs-comment">//call overflow to output the buffer now</span><br>      <span class="hljs-keyword">if</span> (_IO_OVERFLOW (f, EOF) == EOF)<span class="hljs-comment">//end of the file</span><br>	    <span class="hljs-keyword">return</span> to_do == <span class="hljs-number">0</span> ? EOF : n - to_do;<br><br>  <span class="hljs-comment">//try to output one by one block</span><br>      block_size = f-&gt;_IO_buf_end - f-&gt;_IO_buf_base;<br>      do_write = to_do - (block_size &gt;= <span class="hljs-number">128</span> ? to_do % block_size : <span class="hljs-number">0</span>);<br>  <span class="hljs-comment">//output the whole blocks</span><br>      <span class="hljs-keyword">if</span> (do_write)<br>	  &#123;<br>	    count = new_do_write (f, s, do_write);<br>	    to_do -= count;<br>	    <span class="hljs-keyword">if</span> (count &lt; do_write)<br>	      <span class="hljs-keyword">return</span> n - to_do;<br>	  &#125;<br><br>      <span class="hljs-comment">/* Now write out the remainder.  Normally, this will fit in the</span><br><span class="hljs-comment">	 buffer, but it&#x27;s somewhat messier for line-buffered files,</span><br><span class="hljs-comment">	 so we let _IO_default_xsputn handle the general case. */</span><br>      <span class="hljs-keyword">if</span> (to_do)<br>	    to_do -= _IO_default_xsputn (f, s+do_write, to_do);<br>    &#125;<br>  <span class="hljs-keyword">return</span> n - to_do;<br>&#125;<br></code></pre></td></tr></table></figure>
+<h3 id="IO-default-xsputn：输出剩余部分的函数"><a href="#IO-default-xsputn：输出剩余部分的函数" class="headerlink" title="_IO_default_xsputn：输出剩余部分的函数"></a>_IO_default_xsputn：输出剩余部分的函数</h3><figure class="highlight c"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br><span class="line">33</span><br><span class="line">34</span><br><span class="line">35</span><br><span class="line">36</span><br><span class="line">37</span><br><span class="line">38</span><br></pre></td><td class="code"><pre><code class="hljs c">_IO_size_t _IO_default_xsputn (_IO_FILE *f, <span class="hljs-type">const</span> <span class="hljs-type">void</span> *data, _IO_size_t n)<br>&#123;<br>  <span class="hljs-type">const</span> <span class="hljs-type">char</span> *s = (<span class="hljs-type">char</span> *) data;<br>  _IO_size_t more = n;<br>  <span class="hljs-keyword">for</span> (;;)<br>  &#123;<br>    <span class="hljs-keyword">if</span> (f-&gt;_IO_write_ptr &lt; f-&gt;_IO_write_end)<br>	&#123;<br>  <span class="hljs-comment">//get the free space of write buf</span><br>	    _IO_size_t count = f-&gt;_IO_write_end - f-&gt;_IO_write_ptr;<br>	    <span class="hljs-keyword">if</span> (count &gt; more)<br>	      count = more;<br>  <span class="hljs-comment">//first way to copy</span><br>	    <span class="hljs-keyword">if</span> (count &gt; <span class="hljs-number">20</span>)<br>	    &#123;<br>	      <span class="hljs-built_in">memcpy</span> (f-&gt;_IO_write_ptr, s, count);<br>	      f-&gt;_IO_write_ptr += count;<br>	      s += count;<br>	    &#125;<br>  <span class="hljs-comment">//second way to copy</span><br>	    <span class="hljs-keyword">else</span> <span class="hljs-keyword">if</span> (count)<br>	    &#123;<br>	      <span class="hljs-type">char</span> *p = f-&gt;_IO_write_ptr;<br>	      _IO_ssize_t i;<br>	      <span class="hljs-keyword">for</span> (i = count; --i &gt;= <span class="hljs-number">0</span>; )<br>		    *p++ = *s++;<br>	      f-&gt;_IO_write_ptr = p;<br>	    &#125;<br>  <span class="hljs-comment">//finish copy</span><br>	    more -= count;<br>	&#125;<br>  <span class="hljs-comment">//call syswrite until all the needs are done of file end</span><br>    <span class="hljs-keyword">if</span> (more == <span class="hljs-number">0</span> || _IO_OVERFLOW (f, (<span class="hljs-type">unsigned</span> <span class="hljs-type">char</span>) *s++) == EOF)<br>	  <span class="hljs-keyword">break</span>;<br>    more--;<br>  &#125;<br>  <span class="hljs-keyword">return</span> n - more;<br>&#125;<br></code></pre></td></tr></table></figure>
+<h3 id="IO-doallocate：申请缓冲区并设置buf与read指针"><a href="#IO-doallocate：申请缓冲区并设置buf与read指针" class="headerlink" title="_IO_doallocate：申请缓冲区并设置buf与read指针"></a>_IO_doallocate：申请缓冲区并设置buf与read指针</h3><figure class="highlight c"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br></pre></td><td class="code"><pre><code class="hljs c"><span class="hljs-type">int</span> _IO_file_doallocate (_IO_FILE *fp)<br>&#123;<br>  size = _IO_BUFSIZ;<span class="hljs-comment">//8192 bytes</span><br>  <span class="hljs-comment">//some options dealing with size……</span><br>  p = <span class="hljs-built_in">malloc</span> (size);<br>  <span class="hljs-comment">//set buf base and end</span><br>  _IO_setb (fp, p, p + size, <span class="hljs-number">1</span>);<br>  <span class="hljs-keyword">return</span> <span class="hljs-number">1</span>;<br>&#125;<br></code></pre></td></tr></table></figure>
+<h3 id="IO-new-file-overflow：建立并且刷新缓冲区"><a href="#IO-new-file-overflow：建立并且刷新缓冲区" class="headerlink" title="_IO_new_file_overflow：建立并且刷新缓冲区"></a>_IO_new_file_overflow：建立并且刷新缓冲区</h3><figure class="highlight c"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br><span class="line">33</span><br><span class="line">34</span><br><span class="line">35</span><br><span class="line">36</span><br><span class="line">37</span><br><span class="line">38</span><br></pre></td><td class="code"><pre><code class="hljs c"><span class="hljs-type">int</span> _IO_new_file_overflow (_IO_FILE *f, <span class="hljs-type">int</span> ch)<br>&#123;<br>  <span class="hljs-comment">// If currently reading or no buffer allocated.</span><br>  <span class="hljs-keyword">if</span> ((f-&gt;_flags &amp; _IO_CURRENTLY_PUTTING) == <span class="hljs-number">0</span> || f-&gt;_IO_write_base == <span class="hljs-literal">NULL</span>)<br>  &#123;<br>    <span class="hljs-comment">//condition1：need a buffer</span><br>    <span class="hljs-keyword">if</span> (f-&gt;_IO_write_base == <span class="hljs-literal">NULL</span>)<br>	  &#123;<br>    <span class="hljs-comment">//alloc the buffer and set buf base/buf end</span><br>	  _IO_doallocbuf (f);<br>	  _IO_setg (f, f-&gt;_IO_buf_base, f-&gt;_IO_buf_base, f-&gt;_IO_buf_base);<br>	  &#125;<br>    <span class="hljs-comment">//if read has done,put the read ptr at the buf begin</span><br>    <span class="hljs-keyword">if</span> (f-&gt;_IO_read_ptr == f-&gt;_IO_buf_end)<br>	    f-&gt;_IO_read_end = f-&gt;_IO_read_ptr = f-&gt;_IO_buf_base;<br>    <span class="hljs-comment">//the rest of buffer are used to write</span><br>    f-&gt;_IO_write_ptr = f-&gt;_IO_read_ptr;<br>    f-&gt;_IO_write_base = f-&gt;_IO_write_ptr;<br>    f-&gt;_IO_write_end = f-&gt;_IO_buf_end;<br>    f-&gt;_IO_read_base = f-&gt;_IO_read_ptr = f-&gt;_IO_read_end;<br>    <br>    f-&gt;_flags |= _IO_CURRENTLY_PUTTING;<br>    <span class="hljs-keyword">if</span> (f-&gt;_mode &lt;= <span class="hljs-number">0</span> &amp;&amp; f-&gt;_flags &amp; (_IO_LINE_BUF | _IO_UNBUFFERED))<br>	    f-&gt;_IO_write_end = f-&gt;_IO_write_ptr;<br>  &#125;<br>  <span class="hljs-comment">//if the last char is EOF</span><br>  <span class="hljs-keyword">if</span> (ch == EOF)<br>    <span class="hljs-keyword">return</span> _IO_do_write (f, f-&gt;_IO_write_base,f-&gt;_IO_write_ptr - f-&gt;_IO_write_base);<br>  <span class="hljs-comment">//buffer is full</span><br>  <span class="hljs-keyword">if</span> (f-&gt;_IO_write_ptr == f-&gt;_IO_buf_end ) <br>    <span class="hljs-keyword">if</span> (_IO_do_flush (f) == EOF)<br>      <span class="hljs-keyword">return</span> EOF;<br>  *f-&gt;_IO_write_ptr++ = ch;<br>  <span class="hljs-keyword">if</span> ((f-&gt;_flags &amp; _IO_UNBUFFERED) || ((f-&gt;_flags &amp; _IO_LINE_BUF) &amp;&amp; ch == <span class="hljs-string">&#x27;\n&#x27;</span>))<br>    <span class="hljs-keyword">if</span> (_IO_do_write (f, f-&gt;_IO_write_base, f-&gt;_IO_write_ptr - f-&gt;_IO_write_base) == EOF)<br>      <span class="hljs-keyword">return</span> EOF;<br>  <span class="hljs-keyword">return</span> (<span class="hljs-type">unsigned</span> <span class="hljs-type">char</span>) ch;<br>&#125;<br></code></pre></td></tr></table></figure>
+<h3 id="new-do-write：调用输出系统调用"><a href="#new-do-write：调用输出系统调用" class="headerlink" title="new_do_write：调用输出系统调用"></a>new_do_write：调用输出系统调用</h3><figure class="highlight c"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br></pre></td><td class="code"><pre><code class="hljs c"><span class="hljs-type">static</span><br>_IO_size_t<br><span class="hljs-title function_">new_do_write</span> <span class="hljs-params">(_IO_FILE *fp, <span class="hljs-type">const</span> <span class="hljs-type">char</span> *data, _IO_size_t to_do)</span><br>&#123;<br>  _IO_size_t count;<br>  <span class="hljs-comment">//adjust the write pointer……</span><br>  count = _IO_SYSWRITE (fp, data, to_do);<br>  <span class="hljs-keyword">if</span> (fp-&gt;_cur_column &amp;&amp; count)<br>    fp-&gt;_cur_column = _IO_adjust_column (fp-&gt;_cur_column - <span class="hljs-number">1</span>, data, count) + <span class="hljs-number">1</span>;<br>  <span class="hljs-comment">//set all pointer at the begining</span><br>  _IO_setg (fp, fp-&gt;_IO_buf_base, fp-&gt;_IO_buf_base, fp-&gt;_IO_buf_base);<br>  fp-&gt;_IO_write_base = fp-&gt;_IO_write_ptr = fp-&gt;_IO_buf_base;<br>  fp-&gt;_IO_write_end = (fp-&gt;_mode &lt;= <span class="hljs-number">0</span><br>		       &amp;&amp; (fp-&gt;_flags &amp; (_IO_LINE_BUF | _IO_UNBUFFERED))<br>		       ? fp-&gt;_IO_buf_base : fp-&gt;_IO_buf_end);<br>  <span class="hljs-keyword">return</span> count;<br>&#125;<br></code></pre></td></tr></table></figure>
+<p>而对于<code>fwrite</code>而言，核心函数则是<code>_IO_xsputn</code>，该函数先尽力向缓冲区中加入用户需要输出的数据，所需输出的数据处于<code>_IO_write_base</code>和<code>_IO_write_ptr</code>之间，如果还是有待输出数据，则进行输出并刷新缓冲区，即运行<code>_IO_OVERFLOW</code>。<br>在该函数中，如果运行时文件还没有缓冲区，就建立一个缓冲区，但是，这时建立的缓冲区<code>_IO_write_end</code>为缓冲区的末尾；如果是一个存在缓冲区的文件进行<code>_IO_OVERFLOW</code>，则直接调用<code>new_do_write</code>。<br>简单来说<code>_IO_OVERFLOW</code>的前半部分负责输出缓冲区的初始化；<code>new_do_write</code>负责输出，并在输出后将输入指针和输出指针重置。  </p>
+<center>
+    <img style="border-radius: 0.3125em;
+    box-shadow: 0 2px 4px 0 rgba(34,36,38,.12),0 2px 10px 0 rgba(34,36,38,.08);" 
+    src="/assets/fwrite.png" srcset="/img/loading.gif" lazyload width="85%">
+    <br>
+    <div style="color:orange;
+    display: inline-block;
+    color: #999;
+    padding: 15px;">fwrite缓冲区操作</div>
+</center>
+
+<h2 id="reference"><a href="#reference" class="headerlink" title="reference:"></a>reference:</h2><blockquote>
+<p>零基础要如何破除 IO_FILE 利用原理的迷雾 <a target="_blank" rel="noopener" href="http://tttang.com/archive/1742/#toc_io_file">http://tttang.com/archive/1742/#toc_io_file</a><br>IO FILE之fread详解 <a target="_blank" rel="noopener" href="https://www.anquanke.com/post/id/177958">https://www.anquanke.com/post/id/177958</a><br>glibc源码阅读 <a target="_blank" rel="noopener" href="https://elixir.bootlin.com/glibc/glibc-2.36/source">https://elixir.bootlin.com/glibc/glibc-2.36/source</a></p>
+</blockquote>
+
+                
+              </div>
+            
+            <hr/>
+            <div>
+              <div class="post-metas my-3">
+  
+    <div class="post-meta mr-3 d-flex align-items-center">
+      <i class="iconfont icon-category"></i>
+      
+
+<span class="category-chains">
+  
+  
+    
+      <span class="category-chain">
+        
+  <a href="/categories/CTF/" class="category-chain-item">CTF</a>
+  
+  
+
+      </span>
+    
+  
+</span>
+
+    </div>
+  
+  
+    <div class="post-meta">
+      <i class="iconfont icon-tags"></i>
+      
+        <a href="/tags/pwn/" class="print-no-link">#pwn</a>
+      
+    </div>
+  
+</div>
+
+
+              
+  
+
+  <div class="license-box my-3">
+    <div class="license-title">
+      <div>雪夜杂谈——glibc _IO_FILE分析</div>
+      <div>http://example.com/2023/03/14/2023-3-14-GlibcIO/</div>
+    </div>
+    <div class="license-meta">
+      
+        <div class="license-meta-item">
+          <div>Author</div>
+          <div>emiya</div>
+        </div>
+      
+      
+        <div class="license-meta-item license-meta-date">
+          <div>Posted on</div>
+          <div>March 14, 2023</div>
+        </div>
+      
+      
+      
+        <div class="license-meta-item">
+          <div>Licensed under</div>
+          <div>
+            
+              
+              
+                <a class="print-no-link" target="_blank" href="https://creativecommons.org/licenses/by/4.0/">
+                  <span class="hint--top hint--rounded" aria-label="BY - Attribution">
+                    <i class="iconfont icon-by"></i>
+                  </span>
+                </a>
+              
+            
+          </div>
+        </div>
+      
+    </div>
+    <div class="license-icon iconfont"></div>
+  </div>
+
+
+
+              
+                <div class="post-prevnext my-3">
+                  <article class="post-prev col-6">
+                    
+                    
+                      <a href="/2023/09/21/2023-9-21-reverse-for-stm32/" title="electron——OC/OD/上下拉/GPIO">
+                        <i class="iconfont icon-arrowleft"></i>
+                        <span class="hidden-mobile">electron——OC/OD/上下拉/GPIO</span>
+                        <span class="visible-mobile">Previous</span>
+                      </a>
+                    
+                  </article>
+                  <article class="post-next col-6">
+                    
+                    
+                      <a href="/2023/03/08/2023-3-8-Ptmalloc/" title="雪夜杂谈——Ptmalloc堆管理器分析">
+                        <span class="hidden-mobile">雪夜杂谈——Ptmalloc堆管理器分析</span>
+                        <span class="visible-mobile">Next</span>
+                        <i class="iconfont icon-arrowright"></i>
+                      </a>
+                    
+                  </article>
+                </div>
+              
+            </div>
+
+            
+          </article>
+        </div>
+      </div>
+    </div>
+
+    <div class="side-col d-none d-lg-block col-lg-2">
+      
+  <aside class="sidebar" style="margin-left: -1rem">
+    <div id="toc">
+  <p class="toc-header">
+    <i class="iconfont icon-list"></i>
+    <span>Table of Contents</span>
+  </p>
+  <div class="toc-body" id="toc-body"></div>
+</div>
+
+
+
+  </aside>
+
+
+    </div>
+  </div>
+</div>
+
+
+
+
+
+  
+
+
+
+  
+
+
+
+  
+
+
+
+  
+
+
+
+  
+
+
+
+
+
+
+
+    
+
+    
+      <a id="scroll-top-button" aria-label="TOP" href="#" role="button">
+        <i class="iconfont icon-arrowup" aria-hidden="true"></i>
+      </a>
+    
+
+    
+      <div class="modal fade" id="modalSearch" tabindex="-1" role="dialog" aria-labelledby="ModalLabel"
+     aria-hidden="true">
+  <div class="modal-dialog modal-dialog-scrollable modal-lg" role="document">
+    <div class="modal-content">
+      <div class="modal-header text-center">
+        <h4 class="modal-title w-100 font-weight-bold">Search</h4>
+        <button type="button" id="local-search-close" class="close" data-dismiss="modal" aria-label="Close">
+          <span aria-hidden="true">&times;</span>
+        </button>
+      </div>
+      <div class="modal-body mx-3">
+        <div class="md-form mb-5">
+          <input type="text" id="local-search-input" class="form-control validate">
+          <label data-error="x" data-success="v" for="local-search-input">Keyword</label>
+        </div>
+        <div class="list-group" id="local-search-result"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+    
+
+    
+  </main>
+
+  <footer>
+    <div class="footer-inner">
+  
+    <div class="footer-content">
+       <a href="https://hexo.io" target="_blank" rel="nofollow noopener"><span>Hexo</span></a> <i class="iconfont icon-love"></i> <a href="https://github.com/fluid-dev/hexo-theme-fluid" target="_blank" rel="nofollow noopener"><span>Fluid</span></a> 
+    </div>
+  
+  
+  
+  
+</div>
+
+  </footer>
+
+  <!-- Scripts -->
+  
+  <script  src="https://lib.baomitu.com/nprogress/0.2.0/nprogress.min.js" ></script>
+  <link  rel="stylesheet" href="https://lib.baomitu.com/nprogress/0.2.0/nprogress.min.css" />
+
+  <script>
+    NProgress.configure({"showSpinner":false,"trickleSpeed":100})
+    NProgress.start()
+    window.addEventListener('load', function() {
+      NProgress.done();
+    })
+  </script>
+
+
+<script  src="https://lib.baomitu.com/jquery/3.6.4/jquery.min.js" ></script>
+<script  src="https://lib.baomitu.com/twitter-bootstrap/4.6.1/js/bootstrap.min.js" ></script>
+<script  src="/js/events.js" ></script>
+<script  src="/js/plugins.js" ></script>
+
+
+  <script  src="https://lib.baomitu.com/typed.js/2.0.12/typed.min.js" ></script>
+  <script>
+    (function (window, document) {
+      var typing = Fluid.plugins.typing;
+      var subtitle = document.getElementById('subtitle');
+      if (!subtitle || !typing) {
+        return;
+      }
+      var text = subtitle.getAttribute('data-typed-text');
+      
+        typing(text);
+      
+    })(window, document);
+  </script>
+
+
+
+
+  
+    <script  src="/js/img-lazyload.js" ></script>
+  
+
+
+
+
+  
+<script>
+  Fluid.utils.createScript('https://lib.baomitu.com/tocbot/4.20.1/tocbot.min.js', function() {
+    var toc = jQuery('#toc');
+    if (toc.length === 0 || !window.tocbot) { return; }
+    var boardCtn = jQuery('#board-ctn');
+    var boardTop = boardCtn.offset().top;
+
+    window.tocbot.init(Object.assign({
+      tocSelector     : '#toc-body',
+      contentSelector : '.markdown-body',
+      linkClass       : 'tocbot-link',
+      activeLinkClass : 'tocbot-active-link',
+      listClass       : 'tocbot-list',
+      isCollapsedClass: 'tocbot-is-collapsed',
+      collapsibleClass: 'tocbot-is-collapsible',
+      scrollSmooth    : true,
+      includeTitleTags: true,
+      headingsOffset  : -boardTop,
+    }, CONFIG.toc));
+    if (toc.find('.toc-list-item').length > 0) {
+      toc.css('visibility', 'visible');
+    }
+
+    Fluid.events.registerRefreshCallback(function() {
+      if ('tocbot' in window) {
+        tocbot.refresh();
+        var toc = jQuery('#toc');
+        if (toc.length === 0 || !tocbot) {
+          return;
+        }
+        if (toc.find('.toc-list-item').length > 0) {
+          toc.css('visibility', 'visible');
+        }
+      }
+    });
+  });
+</script>
+
+
+  <script src=https://lib.baomitu.com/clipboard.js/2.0.11/clipboard.min.js></script>
+
+  <script>Fluid.plugins.codeWidget();</script>
+
+
+  
+<script>
+  Fluid.utils.createScript('https://lib.baomitu.com/anchor-js/4.3.1/anchor.min.js', function() {
+    window.anchors.options = {
+      placement: CONFIG.anchorjs.placement,
+      visible  : CONFIG.anchorjs.visible
+    };
+    if (CONFIG.anchorjs.icon) {
+      window.anchors.options.icon = CONFIG.anchorjs.icon;
+    }
+    var el = (CONFIG.anchorjs.element || 'h1,h2,h3,h4,h5,h6').split(',');
+    var res = [];
+    for (var item of el) {
+      res.push('.markdown-body > ' + item.trim());
+    }
+    if (CONFIG.anchorjs.placement === 'left') {
+      window.anchors.options.class = 'anchorjs-link-left';
+    }
+    window.anchors.add(res.join(', '));
+
+    Fluid.events.registerRefreshCallback(function() {
+      if ('anchors' in window) {
+        anchors.removeAll();
+        var el = (CONFIG.anchorjs.element || 'h1,h2,h3,h4,h5,h6').split(',');
+        var res = [];
+        for (var item of el) {
+          res.push('.markdown-body > ' + item.trim());
+        }
+        if (CONFIG.anchorjs.placement === 'left') {
+          anchors.options.class = 'anchorjs-link-left';
+        }
+        anchors.add(res.join(', '));
+      }
+    });
+  });
+</script>
+
+
+  
+<script>
+  Fluid.utils.createScript('https://lib.baomitu.com/fancybox/3.5.7/jquery.fancybox.min.js', function() {
+    Fluid.plugins.fancyBox();
+  });
+</script>
+
+
+  <script>Fluid.plugins.imageCaption();</script>
+
+  <script  src="/js/local-search.js" ></script>
+
+
+
+
+
+<!-- 主题的启动项，将它保持在最底部 -->
+<!-- the boot of the theme, keep it at the bottom -->
+<script  src="/js/boot.js" ></script>
+
+
+  
+
+  <noscript>
+    <div class="noscript-warning">Blog works best with JavaScript enabled</div>
+  </noscript>
+</body>
+</html>
