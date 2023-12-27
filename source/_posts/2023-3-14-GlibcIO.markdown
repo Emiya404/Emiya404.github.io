@@ -1,0 +1,364 @@
+---
+title: 雪夜杂谈——glibc _IO_FILE分析
+categories: CTF
+tags: [pwn]
+index_img: /img/fread.png
+banner_img: /img/fread.png
+date: 2023-03-14 18:34:00
+---
+
+## 引言：
+近年来，对于用户态的堆利用已经十分成熟，但是，在打击点（控制流）方面还是十分单一，不过是`malloc hook/free hook`的利用（当今能够轻松进行GOT篡改和栈返回地址篡改的题目确实已经很少了），`_IO_FILE`利用逐渐风靡。  
+说到`_IO_FILE`，我们其实可以将其当作用户态对于系统调用的包装，它使得开发者能够更加透明地利用系统文件的读写，并且隐藏块读取（设备友好）和字节读取（开发者友好）的冲突。它定义了对于数据的组织和存取方法（只不过更加上层，在用户层的定义封装方法）。  
+以下将对glibc中的`fread/fwrite`进行简要分析：
+<!--more-->
+## fread函数：读入ptr-end之间的数据
+### _IO_file_xsgetn：根据缓冲区的情况决定如何读入
+其调用图如下：
+```
+_IO_fread
+    |----_IO_XSGETN
+            |----_IO_file_xsgetn
+                        |----_IO_doallocbuf
+                        |           |----malloc
+                        |----_IO_new_file_underflow
+                                    |----SYSREAD
+```
+```c
+_IO_size_t _IO_file_xsgetn (_IO_FILE *fp, void *data, _IO_size_t n)
+{
+  _IO_size_t want, have;
+  _IO_ssize_t count;
+  char *s = data;
+  want = n;
+  if (fp->_IO_buf_base == NULL)
+  {
+      //alloc the buffer
+      _IO_doallocbuf (fp);
+  }
+
+  while (want > 0)
+  {
+    have = fp->_IO_read_end - fp->_IO_read_ptr;
+    //enough data for request->copy all the data to user
+    if (want <= have)
+    {
+      memcpy (s, fp->_IO_read_ptr, want);
+      fp->_IO_read_ptr += want;
+      want = 0;
+    }
+    else
+    {
+    //not enough,read the remainder first
+      if (have > 0)
+      {
+        memcpy (s, fp->_IO_read_ptr, have);
+        s += have;
+        want -= have;
+        fp->_IO_read_ptr += have;
+      }
+      /* If we now want less than a buffer, underflow and repeat
+         the copy.  Otherwise, _IO_SYSREAD directly to
+         the user buffer. */
+      if (fp->_IO_buf_base
+          && want < (size_t) (fp->_IO_buf_end - fp->_IO_buf_base))
+      {
+          if (__underflow (fp) == EOF)
+            break;
+          continue;
+      }
+
+      /* These must be set before the sysread as we might longjmp out
+         waiting for input. */
+      _IO_setg (fp, fp->_IO_buf_base, fp->_IO_buf_base, fp->_IO_buf_base);
+      _IO_setp (fp, fp->_IO_buf_base, fp->_IO_buf_base);
+
+      /* Try to maintain alignment: read a whole number of blocks.  */
+      count = want;
+      if (fp->_IO_buf_base)
+      {
+        _IO_size_t block_size = fp->_IO_buf_end - fp->_IO_buf_base;
+        if (block_size >= 128)
+          count -= want % block_size;
+      }
+
+      count = _IO_SYSREAD (fp, s, count);
+      if (count <= 0)
+      {
+        if (count == 0)
+          fp->_flags |= _IO_EOF_SEEN;
+        else
+          fp->_flags |= _IO_ERR_SEEN;
+        break;
+      }
+
+      s += count;
+      want -= count;
+      if (fp->_offset != _IO_pos_BAD)
+        _IO_pos_adjust (fp->_offset, count);
+    }
+  }
+  return n - want;
+}
+```
+### _IO_new_file_underflow
+```c
+int _IO_new_file_underflow (_IO_FILE *fp)  
+{  
+  _IO_ssize_t count;  
+  //have read all the remainder
+  if (fp->_IO_read_ptr < fp->_IO_read_end)  
+    return *(unsigned char *) fp->_IO_read_ptr;  
+  //if no buffer allocate one!
+  if (fp->_IO_buf_base == NULL)  
+  {  
+      _IO_doallocbuf (fp);  
+  }  
+  _IO_switch_to_get_mode (fp);  
+  //no remainder,so flush the read buf
+  fp->_IO_read_base = fp->_IO_read_ptr = fp->_IO_buf_base;  
+  fp->_IO_read_end = fp->_IO_buf_base;  
+  fp->_IO_write_base = fp->_IO_write_ptr = fp->_IO_write_end = fp->_IO_buf_base;  
+  //read into all the buf
+  count = _IO_SYSREAD (fp, fp->_IO_buf_base, fp->_IO_buf_end - fp->_IO_buf_base);  
+  if (count <= 0)  
+  {  
+    if (count == 0)  
+      fp->_flags |= _IO_EOF_SEEN;  
+    else  
+      fp->_flags |= _IO_ERR_SEEN, count = 0;  
+  } 
+  //data is between read ptr and read end
+  fp->_IO_read_end += count;   
+  return *(unsigned char *) fp->_IO_read_ptr;  
+}  
+```
+通过上述代码，我们可以发现，fread事实上是对系统调用read的包装，由于需要配合缓冲区而稍显复杂。在`_IO_file_xsgetn`中，函数先尽力将缓冲中的数据尽数输出，如果仍然达不到需要，则调用`_IO_new_file_underflow`过程。该过程中因为考虑到缓冲区中已经没有了未读数据，就直接刷新缓冲（将读指针的始末调到缓冲的开始），并在读取之后将`_IO_read_end`指针指向末尾，完成了新的缓冲状态建立。  
+<center>
+    <img style="border-radius: 0.3125em;
+    box-shadow: 0 2px 4px 0 rgba(34,36,38,.12),0 2px 10px 0 rgba(34,36,38,.08);" 
+    src="/assets/fread.png" width="85%">
+    <br>
+    <div style="color:orange;
+    display: inline-block;
+    color: #999;
+    padding: 15px;">fread缓冲区操作</div>
+</center>
+
+在这种模型中，每次调用`fread`libc都会假设该文件的缓冲中可能有残留信息，也会在每次读取完成后达成该种状态，即：通过系统调用按用户需要读取，但`underflow`读取时按缓冲区块读取。  
+## fwrite函数：输出base-ptr之间的数据
+其调用图如下：
+```
+_IO_fwrite
+    |----_IO_new_file_xsputn
+                |----_IO_new_file_overflow
+                |           |----_IO_doallocbuf
+                |           |          |----malloc
+                |           |----new_do_write
+                |                      |----SYSWRITE
+                |
+                |----_IO_default_xsputn
+                            |----_IO_new_file_overflow
+```
+### _IO_xsputn：根据缓冲区的情况决定如何输出
+```c
+_IO_size_t _IO_new_file_xsputn (_IO_FILE *f, const void *data, _IO_size_t n)
+{
+  const char *s = (const char *) data;
+  _IO_size_t to_do = n;
+  int must_flush = 0;
+  _IO_size_t count = 0;
+  //if there is no needbuf or is putting now->out put the line
+  if ((f->_flags & _IO_LINE_BUF) && (f->_flags & _IO_CURRENTLY_PUTTING))
+  {
+    count = f->_IO_buf_end - f->_IO_write_ptr;
+    if (count >= n)
+	{
+	  const char *p;
+	  for (p = s + n; p > s; )
+	  {
+	    if (*--p == '\n')
+		{
+		    count = p - s + 1;
+		    must_flush = 1;
+		    break;
+		}
+	  }
+	}
+  }
+  //count means how many empty buf we have and then we will fill it
+  else if (f->_IO_write_end > f->_IO_write_ptr)
+    count = f->_IO_write_end - f->_IO_write_ptr;
+
+  //fill the buffer
+  if (count > 0)
+  {
+      if (count > to_do)
+	      count = to_do;
+      memcpy (f->_IO_write_ptr, s, count);
+      f->_IO_write_ptr += count;
+      s += count;
+      to_do -= count;
+  }
+  //if we fill the whole space but we need more output
+  if (to_do + must_flush > 0)
+  {
+      _IO_size_t block_size, do_write;
+  //call overflow to output the buffer now
+      if (_IO_OVERFLOW (f, EOF) == EOF)//end of the file
+	    return to_do == 0 ? EOF : n - to_do;
+
+  //try to output one by one block
+      block_size = f->_IO_buf_end - f->_IO_buf_base;
+      do_write = to_do - (block_size >= 128 ? to_do % block_size : 0);
+  //output the whole blocks
+      if (do_write)
+	  {
+	    count = new_do_write (f, s, do_write);
+	    to_do -= count;
+	    if (count < do_write)
+	      return n - to_do;
+	  }
+
+      /* Now write out the remainder.  Normally, this will fit in the
+	 buffer, but it's somewhat messier for line-buffered files,
+	 so we let _IO_default_xsputn handle the general case. */
+      if (to_do)
+	    to_do -= _IO_default_xsputn (f, s+do_write, to_do);
+    }
+  return n - to_do;
+}
+```
+### _IO_default_xsputn：输出剩余部分的函数
+```c
+_IO_size_t _IO_default_xsputn (_IO_FILE *f, const void *data, _IO_size_t n)
+{
+  const char *s = (char *) data;
+  _IO_size_t more = n;
+  for (;;)
+  {
+    if (f->_IO_write_ptr < f->_IO_write_end)
+	{
+  //get the free space of write buf
+	    _IO_size_t count = f->_IO_write_end - f->_IO_write_ptr;
+	    if (count > more)
+	      count = more;
+  //first way to copy
+	    if (count > 20)
+	    {
+	      memcpy (f->_IO_write_ptr, s, count);
+	      f->_IO_write_ptr += count;
+	      s += count;
+	    }
+  //second way to copy
+	    else if (count)
+	    {
+	      char *p = f->_IO_write_ptr;
+	      _IO_ssize_t i;
+	      for (i = count; --i >= 0; )
+		    *p++ = *s++;
+	      f->_IO_write_ptr = p;
+	    }
+  //finish copy
+	    more -= count;
+	}
+  //call syswrite until all the needs are done of file end
+    if (more == 0 || _IO_OVERFLOW (f, (unsigned char) *s++) == EOF)
+	  break;
+    more--;
+  }
+  return n - more;
+}
+```
+### _IO_doallocate：申请缓冲区并设置buf与read指针
+```c
+int _IO_file_doallocate (_IO_FILE *fp)
+{
+  size = _IO_BUFSIZ;//8192 bytes
+  //some options dealing with size……
+  p = malloc (size);
+  //set buf base and end
+  _IO_setb (fp, p, p + size, 1);
+  return 1;
+}
+```
+### _IO_new_file_overflow：建立并且刷新缓冲区
+```c
+int _IO_new_file_overflow (_IO_FILE *f, int ch)
+{
+  // If currently reading or no buffer allocated.
+  if ((f->_flags & _IO_CURRENTLY_PUTTING) == 0 || f->_IO_write_base == NULL)
+  {
+    //condition1：need a buffer
+    if (f->_IO_write_base == NULL)
+	  {
+    //alloc the buffer and set buf base/buf end
+	  _IO_doallocbuf (f);
+	  _IO_setg (f, f->_IO_buf_base, f->_IO_buf_base, f->_IO_buf_base);
+	  }
+    //if read has done,put the read ptr at the buf begin
+    if (f->_IO_read_ptr == f->_IO_buf_end)
+	    f->_IO_read_end = f->_IO_read_ptr = f->_IO_buf_base;
+    //the rest of buffer are used to write
+    f->_IO_write_ptr = f->_IO_read_ptr;
+    f->_IO_write_base = f->_IO_write_ptr;
+    f->_IO_write_end = f->_IO_buf_end;
+    f->_IO_read_base = f->_IO_read_ptr = f->_IO_read_end;
+    
+    f->_flags |= _IO_CURRENTLY_PUTTING;
+    if (f->_mode <= 0 && f->_flags & (_IO_LINE_BUF | _IO_UNBUFFERED))
+	    f->_IO_write_end = f->_IO_write_ptr;
+  }
+  //if the last char is EOF
+  if (ch == EOF)
+    return _IO_do_write (f, f->_IO_write_base,f->_IO_write_ptr - f->_IO_write_base);
+  //buffer is full
+  if (f->_IO_write_ptr == f->_IO_buf_end ) 
+    if (_IO_do_flush (f) == EOF)
+      return EOF;
+  *f->_IO_write_ptr++ = ch;
+  if ((f->_flags & _IO_UNBUFFERED) || ((f->_flags & _IO_LINE_BUF) && ch == '\n'))
+    if (_IO_do_write (f, f->_IO_write_base, f->_IO_write_ptr - f->_IO_write_base) == EOF)
+      return EOF;
+  return (unsigned char) ch;
+}
+```
+### new_do_write：调用输出系统调用
+```c
+static
+_IO_size_t
+new_do_write (_IO_FILE *fp, const char *data, _IO_size_t to_do)
+{
+  _IO_size_t count;
+  //adjust the write pointer……
+  count = _IO_SYSWRITE (fp, data, to_do);
+  if (fp->_cur_column && count)
+    fp->_cur_column = _IO_adjust_column (fp->_cur_column - 1, data, count) + 1;
+  //set all pointer at the begining
+  _IO_setg (fp, fp->_IO_buf_base, fp->_IO_buf_base, fp->_IO_buf_base);
+  fp->_IO_write_base = fp->_IO_write_ptr = fp->_IO_buf_base;
+  fp->_IO_write_end = (fp->_mode <= 0
+		       && (fp->_flags & (_IO_LINE_BUF | _IO_UNBUFFERED))
+		       ? fp->_IO_buf_base : fp->_IO_buf_end);
+  return count;
+}
+```
+而对于`fwrite`而言，核心函数则是`_IO_xsputn`，该函数先尽力向缓冲区中加入用户需要输出的数据，所需输出的数据处于`_IO_write_base`和`_IO_write_ptr`之间，如果还是有待输出数据，则进行输出并刷新缓冲区，即运行`_IO_OVERFLOW`。  
+在该函数中，如果运行时文件还没有缓冲区，就建立一个缓冲区，但是，这时建立的缓冲区`_IO_write_end`为缓冲区的末尾；如果是一个存在缓冲区的文件进行`_IO_OVERFLOW`，则直接调用`new_do_write`。  
+简单来说`_IO_OVERFLOW`的前半部分负责输出缓冲区的初始化；`new_do_write`负责输出，并在输出后将输入指针和输出指针重置。  
+
+<center>
+    <img style="border-radius: 0.3125em;
+    box-shadow: 0 2px 4px 0 rgba(34,36,38,.12),0 2px 10px 0 rgba(34,36,38,.08);" 
+    src="/assets/fwrite.png" width="85%">
+    <br>
+    <div style="color:orange;
+    display: inline-block;
+    color: #999;
+    padding: 15px;">fwrite缓冲区操作</div>
+</center>
+
+## reference:
+> 零基础要如何破除 IO_FILE 利用原理的迷雾 http://tttang.com/archive/1742/#toc_io_file  
+IO FILE之fread详解 https://www.anquanke.com/post/id/177958  
+glibc源码阅读 https://elixir.bootlin.com/glibc/glibc-2.36/source
